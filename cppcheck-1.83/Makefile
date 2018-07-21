@@ -80,7 +80,7 @@ ifeq (clang++, $(findstring clang++,$(CXX)))
     CPPCHK_GLIBCXX_DEBUG=
 endif
 ifndef CXXFLAGS
-    CXXFLAGS=-std=c++0x -O2 -include lib/cxx11emu.h -DNDEBUG -Wall -Wno-sign-compare
+    CXXFLAGS=-std=c++0x -O2 -static -include lib/cxx11emu.h -DNDEBUG -Wall -Wno-sign-compare
 endif
 
 ifeq (g++, $(findstring g++,$(CXX)))

@@ -33,9 +33,9 @@
 
 #include <cstddef>
 #include <list>
+#include <iostream>
 
 //---------------------------------------------------------------------------
-
 
 // Register this check class into cppcheck by creating a static instance of it..
 namespace {
@@ -317,6 +317,14 @@ void CheckAutoVariables::autoVariables()
                     errorInvalidDeallocation(tok);
             } else if ((Token::Match(tok, "%name% ( & %var% ) ;") && _settings->library.dealloc(tok)) ||
                        (_tokenizer->isCPP() && Token::Match(tok, "delete [| ]| (| & %var% !!["))) {
+#if 1
+                if ( tok->str().compare(0, strlen("cmsObj_free"), "cmsObj_free")==0
+                  || tok->str().compare(0, strlen("mdm_freeObject"), "mdm_freeObject")==0)
+                {
+		     return ;
+                }
+#endif		
+
                 tok = Token::findmatch(tok->next(), "%var%");
                 if (isAutoVar(tok))
                     errorInvalidDeallocation(tok);

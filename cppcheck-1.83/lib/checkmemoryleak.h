@@ -98,7 +98,7 @@ public:
     }
 
     /** @brief What type of allocation are used.. the "Many" means that several types of allocation and deallocation are used */
-    enum AllocType { No, Malloc, New, NewArray, File, Fd, Pipe, OtherMem, OtherRes, Many };
+    enum AllocType { No, Malloc, New, NewArray, File, Fd, Pipe, OtherMem, OtherRes, Many, cmsMem_Alloc, mdmObj_Alloc };
 
     void memoryLeak(const Token *tok, const std::string &varname, AllocType alloctype) const;
 
@@ -133,8 +133,11 @@ public:
      * @param tok token where memory is leaked
      * @param varname name of variable
      */
+#if 0
     void memleakError(const Token *tok, const std::string &varname) const;
-
+#else
+    void memleakError(const Token *tok, const std::string &varname, AllocType alloctype) const;
+#endif
     /**
      * Report that there is a resource leak (fopen/popen/etc)
      * @param tok token where resource is leaked
@@ -291,7 +294,7 @@ private:
     void getErrorMessages(ErrorLogger *e, const Settings *settings) const {
         CheckMemoryLeakInFunction c(nullptr, settings, e);
 
-        c.memleakError(nullptr, "varname");
+        c.memleakError(nullptr, "varname", No);
         c.resourceLeakError(nullptr, "varname");
 
         c.deallocDeallocError(nullptr, "varname");

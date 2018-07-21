@@ -31,6 +31,9 @@
 #include "utils.h"
 #include "valueflow.h"
 
+#include <iostream>
+#include <cstring>
+
 #include <algorithm>
 #include <cstddef>
 #include <set>
@@ -163,10 +166,43 @@ CheckMemoryLeak::AllocType CheckMemoryLeak::getAllocationType(const Token *tok2,
         }
 
         // Does tok2 point on a Library allocation function?
-        const int alloctype = settings1->library.alloc(tok2, -1);
+
+        int arg_num=-1;
+#if 1
+        std::string function_name=settings1->library.getFunctionName(tok2);
+        if ( function_name.compare(0, strlen("cmsObj_"), "cmsObj_")==0
+        || function_name.compare(0, strlen("cmsMem_"), "cmsMem_")==0
+        || function_name.compare(0, strlen("mdm_getObject"), "mdm_getObject")==0 
+        || function_name.compare(0, strlen("mdm_freeObject"), "mdm_freeObject")==0 )
+        {
+            arg_num=1;
+            int alloctype_2 = settings1->library.alloc(tok2, arg_num);
+            while (alloctype_2==0 && arg_num<7)	
+                alloctype_2 = settings1->library.alloc(tok2, ++arg_num);
+			
+            if (alloctype_2==0)
+                arg_num=-1;
+			
+            //std::cout<<__FUNCTION__<<": "<<__LINE__<<", tok="<<function_name<<" arg_num="<<arg_num<<"\n";
+        }
+#endif		
+        const int alloctype = settings1->library.alloc(tok2, arg_num);
         if (alloctype > 0) {
             if (alloctype == settings1->library.deallocId("free"))
                 return Malloc;
+#if 1
+            if (alloctype == settings1->library.deallocId("cmsObj_free")
+             || alloctype == settings1->library.deallocId("mdm_freeObject"))
+            {			
+                //std::cout<<__FUNCTION__<<" : "<<__LINE__<<"cmsObj_free ==>mdmObj_Alloc!"<<std::endl;
+                return mdmObj_Alloc;
+            }
+
+            if (alloctype == settings1->library.deallocId("cmsMem_free")){				
+                //std::cout<<__FUNCTION__<<" : "<<__LINE__<<"cmsMem_free ==>cmsMem_Alloc!"<<std::endl;
+                return cmsMem_Alloc;
+            }
+#endif			
             if (alloctype == settings1->library.deallocId("fclose"))
                 return File;
             return Library::ismemory(alloctype) ? OtherMem : OtherRes;
@@ -256,8 +292,23 @@ CheckMemoryLeak::AllocType CheckMemoryLeak::getDeallocationType(const Token *tok
                 // Does tok point on a Library deallocation function?
                 const int dealloctype = settings1->library.dealloc(tok, argNr);
                 if (dealloctype > 0) {
-                    if (dealloctype == settings1->library.deallocId("free"))
+                    if (dealloctype == settings1->library.deallocId("free")){
+                        //std::cout<<__FUNCTION__<<" : "<<__LINE__<<"malloc ==>Malloc!"<<std::endl;
                         return Malloc;
+                    }
+#if 1					
+                    if (dealloctype == settings1->library.deallocId("cmsObj_free")
+                     || dealloctype == settings1->library.deallocId("mdm_freeObject")){					 
+                        //std::cout<<__FUNCTION__<<" : "<<__LINE__<<"cmsObj_free ==>mdmObj_Alloc!"<<std::endl;
+                        return mdmObj_Alloc;
+                    }
+					
+                    if (dealloctype == settings1->library.deallocId("cmsMem_free")){						
+                        //std::cout<<__FUNCTION__<<" : "<<__LINE__<<"cmsMem_free ==>cmsMem_Alloc!"<<std::endl;
+                        return cmsMem_Alloc;
+                    }
+#endif
+					
                     if (dealloctype == settings1->library.deallocId("fclose"))
                         return File;
                     return Library::ismemory(dealloctype) ? OtherMem : OtherRes;
@@ -283,7 +334,7 @@ void CheckMemoryLeak::memoryLeak(const Token *tok, const std::string &varname, A
         alloctype == CheckMemoryLeak::OtherRes)
         resourceLeakError(tok, varname);
     else
-        memleakError(tok, varname);
+        memleakError(tok, varname, alloctype);
 }
 //---------------------------------------------------------------------------
 
@@ -306,9 +357,16 @@ void CheckMemoryLeak::reportErr(const std::list<const Token *> &callstack, Sever
         Check::reportError(errmsg);
 }
 
-void CheckMemoryLeak::memleakError(const Token *tok, const std::string &varname) const
+void CheckMemoryLeak::memleakError(const Token *tok, const std::string &varname, AllocType alloctype) const
 {
-    reportErr(tok, Severity::error, "memleak", "Memory leak: " + varname, CWE(401U));
+    if (alloctype==mdmObj_Alloc)
+        reportErr(tok, Severity::error, "memleak", "cms object Memory leak: " + varname, CWE(401U));
+    else if (alloctype==cmsMem_Alloc)	
+        reportErr(tok, Severity::error, "memleak", "cms Memory leak: " + varname, CWE(401U));
+    else
+        reportErr(tok, Severity::error, "memleak", "Memory leak: " + varname, CWE(401U));
+    //tok->printAst(true,false, std::cout);
+    //std::cout<<"file="<<tokenizer->list.file(tok)/*tok->fileIndex()*/<<" line="<<tok->linenr()<<std::endl;
 }
 
 void CheckMemoryLeak::memleakUponReallocFailureError(const Token *tok, const std::string &varname) const
@@ -775,7 +833,7 @@ Token *CheckMemoryLeakInFunction::getcode(const Token *tok, std::list<const Toke
                 continue;
             }
         } else {
-
+            int brcm_cms_call=0;
             if (Token::Match(tok, "%varid% = close ( %varid% )", varid)) {
                 addtoken(&rettail, tok, "dealloc");
                 addtoken(&rettail, tok, ";");
@@ -792,7 +850,19 @@ Token *CheckMemoryLeakInFunction::getcode(const Token *tok, std::list<const Toke
             }
 
             if (Token::Match(tok->previous(), "[(;{}] %varid% =", varid) ||
-                Token::Match(tok, "asprintf|vasprintf ( & %varid% ,", varid)) {
+                Token::Match(tok, "asprintf|vasprintf ( & %varid% ,", varid)
+#if 0
+                || Token::Match(tok, "cmsObj_get|cmsObj_getNextFlags ( %var% , & %var% , %var% , & %varid% )", varid)
+                || Token::Match(tok, "cmsObj_getNext|mdm_getObject ( %var% , & %var% , & %varid% )", varid)
+                || Token::Match(tok, "cmsObj_getNextInSubTree ( %var% , & %var% , & %var% , & %varid% )", varid)
+                || Token::Match(tok, "cmsObj_getNextInSubTreeFlags ( %var% , & %var% , & %var% , %var% , & %varid% )", varid)
+                || Token::Match(tok, "cmsObj_getAncestor ( %var% , %var% , & %var% , & %varid% )", varid)
+                || Token::Match(tok, "cmsObj_getAncestorFlags ( %var% , %var% , & %var% , %var% , & %varid% )", varid)
+#else
+                || Token::simpleMatch(tok, "cmsObj_get|cmsObj_getNextFlags|cmsObj_getNext|mdm_getObject ( ")
+                || Token::simpleMatch(tok, "cmsObj_getNextInSubTree|cmsObj_getNextInSubTreeFlags|cmsObj_getAncestor|cmsObj_getAncestorFlags ( ")
+#endif
+                ) {
                 CheckMemoryLeak::AllocType alloc;
 
                 if (Token::Match(tok, "asprintf|vasprintf (")) {
@@ -803,8 +873,17 @@ Token *CheckMemoryLeakInFunction::getcode(const Token *tok, std::list<const Toke
                     }
                     alloc = Malloc;
                     tok = tok->next()->link();
-                } else {
-                    alloc = getAllocationType(tok->tokAt(2), varid);
+                }
+                else {
+                    if (Token::Match(tok, "cmsObj_get|cmsObj_getNextFlags ( ")){
+                        brcm_cms_call = 1;
+                        alloc = getAllocationType(tok, varid);
+                    }
+                    else
+                        alloc = getAllocationType(tok->tokAt(2), varid);
+#ifdef QSL_DEBUG
+                    td::cout<<"alloc="<<alloc<<" tok="<<tok->str()<<std::endl;
+#endif
                 }
 
                 if (sz > 1 &&
@@ -876,6 +955,9 @@ Token *CheckMemoryLeakInFunction::getcode(const Token *tok, std::list<const Toke
                         tok = tok->linkAt(3);
                         continue;
                     }
+
+                    if (brcm_cms_call)
+                        continue;
                 }
 
                 // assignment..
@@ -2766,7 +2848,14 @@ void CheckMemoryLeakNoVar::functionCallLeak(const Token *loc, const std::string 
 
 void CheckMemoryLeakNoVar::returnValueNotUsedError(const Token *tok, const std::string &alloc)
 {
-    reportError(tok, Severity::error, "leakReturnValNotUsed", "Return value of allocation function '" + alloc + "' is not stored.", CWE771, false);
+    if ( 0==alloc.compare(0,strlen("cmsObj_get"),"cmsObj_get")
+      || 0==alloc.compare(0,strlen("mdm_getObject"),"mdm_getObject")
+      || 0==alloc.compare(0,strlen("mdm_getNextObject"),"mdm_getNextObject")
+      || 0==alloc.compare(0,strlen("mdm_getNextObjectInSubTree"),"mdm_getNextObjectInSubTree")
+      || 0==alloc.compare(0,strlen("mdm_getAncestorObject"),"mdm_getAncestorObject") )
+        ;//std::cout<<"ignore error!!\n";
+    else
+        reportError(tok, Severity::error, "leakReturnValNotUsed", "Return value of allocation function '" + alloc + "' is not stored.", CWE771, false);
 }
 
 void CheckMemoryLeakNoVar::unsafeArgAllocError(const Token *tok, const std::string &funcName, const std::string &ptrType, const std::string& objType)

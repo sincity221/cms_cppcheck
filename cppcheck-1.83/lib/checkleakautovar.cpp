@@ -97,10 +97,12 @@ void VarInfo::possibleUsageAll(const std::string &functionName)
 void CheckLeakAutoVar::leakError(const Token *tok, const std::string &varname, int type)
 {
     const CheckMemoryLeak checkmemleak(_tokenizer, _errorLogger, _settings);
+    //std::cout<<"auto var!! var="<<varname<<"\n";
     if (_settings->library.isresource(type))
         checkmemleak.resourceLeakError(tok, varname);
-    else
-        checkmemleak.memleakError(tok, varname);
+    else{
+        checkmemleak.memleakError(tok, varname, checkmemleak.Malloc);
+    }
 }
 
 void CheckLeakAutoVar::mismatchError(const Token *tok, const std::string &varname)
